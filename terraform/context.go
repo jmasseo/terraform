@@ -235,7 +235,7 @@ func (c *Context) Input(mode InputMode) error {
 	defer c.releaseRun(v)
 
 	debug.SetPhase("input")
-	defer debug.SetPhase("")
+	defer debug.SetPhase("INVALID")
 
 	if mode&InputModeVar != 0 {
 		// Walk the variables first for the root module. We walk them in
@@ -358,7 +358,7 @@ func (c *Context) Apply() (*State, error) {
 	defer c.releaseRun(v)
 
 	debug.SetPhase("apply")
-	defer debug.SetPhase("")
+	defer debug.SetPhase("INVALID")
 
 	// Copy our own state
 	c.state = c.state.DeepCopy()
@@ -458,7 +458,7 @@ func (c *Context) Plan() (*Plan, error) {
 	defer c.releaseRun(v)
 
 	debug.SetPhase("plan")
-	defer debug.SetPhase("")
+	defer debug.SetPhase("INVALID")
 
 	p := &Plan{
 		Module:  c.module,
@@ -561,7 +561,7 @@ func (c *Context) Refresh() (*State, error) {
 	defer c.releaseRun(v)
 
 	debug.SetPhase("refresh")
-	defer debug.SetPhase("")
+	defer debug.SetPhase("INVALID")
 
 	// Copy our own state
 	c.state = c.state.DeepCopy()
@@ -610,7 +610,7 @@ func (c *Context) Validate() ([]string, []error) {
 	defer c.releaseRun(v)
 
 	debug.SetPhase("validate")
-	defer debug.SetPhase("")
+	defer debug.SetPhase("INVALID")
 
 	var errs error
 
