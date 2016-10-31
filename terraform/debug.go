@@ -18,8 +18,10 @@ import (
 // the debug archive. All methods are safe to call on the nil value.
 var debug *debugInfo
 
-// SetDebugInfo sets the debug options for the terraform package. Currently
-// this just sets the path where the archive will be written.
+// SetDebugInfo initializes the debug handler with a backing file in the
+// provided directory. This must be called before any other terraform package
+// operations or not at all. Once his is called, CloseDebugInfo should be
+// called before program exit.
 func SetDebugInfo(path string) error {
 	if os.Getenv("TF_DEBUG") == "" {
 		return nil
@@ -34,10 +36,15 @@ func SetDebugInfo(path string) error {
 	return nil
 }
 
+// CloseDebugInfo is the exported interface to Close the debug info handler.
+// The debug handler needs to be closed before program exit, so we export this
+// function to be deferred in the appropriate entrypoint for our executable.
 func CloseDebugInfo() error {
 	return debug.Close()
 }
 
+// newDebugInfoFile initializes the global debug handler with a backing file in
+// the provided directory.
 func newDebugInfoFile(dir string) (*debugInfo, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
@@ -55,14 +62,15 @@ func newDebugInfoFile(dir string) (*debugInfo, error) {
 	return newDebugInfo(name, f)
 }
 
+// newDebugInfo initializes the global debug handler.
 func newDebugInfo(name string, w io.Writer) (*debugInfo, error) {
 	gz := gzip.NewWriter(w)
 
 	d := &debugInfo{
-		name:       name,
-		w:          w,
-		compressor: gz,
-		archive:    tar.NewWriter(gz),
+		name: name,
+		w:    w,
+		gz:   gz,
+		tar:  tar.NewWriter(gz),
 	}
 
 	// create the subdirs we need
@@ -76,9 +84,9 @@ func newDebugInfo(name string, w io.Writer) (*debugInfo, error) {
 		Typeflag: tar.TypeDir,
 		Mode:     0755,
 	}
-	err := d.archive.WriteHeader(topHdr)
+	err := d.tar.WriteHeader(topHdr)
 	// if the first errors, the second will too
-	err = d.archive.WriteHeader(graphsHdr)
+	err = d.tar.WriteHeader(graphsHdr)
 	if err != nil {
 		return nil, err
 	}
@@ -86,14 +94,23 @@ func newDebugInfo(name string, w io.Writer) (*debugInfo, error) {
 	return d, nil
 }
 
-type syncer interface {
-	Sync() error
-}
-
+// debugInfo provides various methods for writing debug information to a
+// central archive. The debugInfo struct should be initialized once before any
+// output is written, and Close should be called before program exit. All
+// exported methods on debugInfo will be safe for concurrent use. The exported
+// methods are also all safe to call on a nil pointer, so that there is no need
+// for conditional blocks before writing debug information.
+//
+// Each write operation done by the debugInfo will flush the gzip.Writer and
+// tar.Writer, and call Sync() or Flush() on the output writer as needed. This
+// ensures that as much data as possible is written to storage in the event of
+// a crash. The append format of the tar file, and the stream format of the
+// gzip writer allow easy recovery f the data in the event that the debugInfo
+// is not closed before program exit.
 type debugInfo struct {
 	sync.Mutex
 
-	// directory name
+	// archive root directory name
 	name string
 
 	// current operation phase
@@ -105,12 +122,15 @@ type debugInfo struct {
 	// flag to protect Close()
 	closed bool
 
-	// the debug log output goes here
-	w          io.Writer
-	compressor *gzip.Writer
-	archive    *tar.Writer
+	// the debug log output is in a tar.gz format, written to the io.Writer w
+	w   io.Writer
+	gz  *gzip.Writer
+	tar *tar.Writer
 }
 
+// Set the name of the current operational phase in the debug handler. Each file
+// in the archive will contain the name of the phase in which it was created,
+// i.e. "input", "apply", "plan", "refresh", "validate"
 func (d *debugInfo) SetPhase(phase string) {
 	if d == nil {
 		return
@@ -121,6 +141,9 @@ func (d *debugInfo) SetPhase(phase string) {
 	d.phase = phase
 }
 
+// Close the debugInfo, finalizing the data in storage. This closes the
+// tar.Writer, the gzip.Wrtier, and if the output writer is an io.Closer, it is
+// also closed.
 func (d *debugInfo) Close() error {
 	if d == nil {
 		return nil
@@ -134,8 +157,8 @@ func (d *debugInfo) Close() error {
 	}
 	d.closed = true
 
-	d.archive.Close()
-	d.compressor.Close()
+	d.tar.Close()
+	d.gz.Close()
 
 	if c, ok := d.w.(io.Closer); ok {
 		return c.Close()
@@ -143,17 +166,32 @@ func (d *debugInfo) Close() error {
 	return nil
 }
 
-// make sure things are always flushed in the correct order
+type syncer interface {
+	Sync() error
+}
+
+type flusher interface {
+	Flush() error
+}
+
+// Flush the tar.Writer and the gzip.Writer. Flush() or Sync() will be called
+// on the output writer if they are available.
 func (d *debugInfo) flush() {
-	d.archive.Flush()
-	d.compressor.Flush()
+	d.tar.Flush()
+	d.gz.Flush()
+
+	if f, ok := d.w.(flusher); ok {
+		f.Flush()
+	}
 
 	if s, ok := d.w.(syncer); ok {
 		s.Sync()
 	}
 }
 
-// Write the current graph state to the debug log in dot format.
+// WriteGraph takes a DebugGraph and writes both the DebugGraph as a dot file
+// in the debug archive, and extracts any logs that the DebugGraph collected
+// and writes them to a log file in the archive.
 func (d *debugInfo) WriteGraph(dg *DebugGraph) error {
 	if d == nil {
 		return nil
@@ -171,7 +209,7 @@ func (d *debugInfo) WriteGraph(dg *DebugGraph) error {
 	// sync'ed.
 	defer d.flush()
 
-	d.writeFile(dg.Name, dg.buf.Bytes())
+	d.writeFile(dg.Name, dg.LogBytes())
 
 	dotPath := fmt.Sprintf("%s/graphs/%d-%s-%s.dot", d.name, d.step, d.phase, dg.Name)
 	d.step++
@@ -183,12 +221,12 @@ func (d *debugInfo) WriteGraph(dg *DebugGraph) error {
 		Size: int64(len(dotBytes)),
 	}
 
-	err := d.archive.WriteHeader(hdr)
+	err := d.tar.WriteHeader(hdr)
 	if err != nil {
 		return err
 	}
 
-	_, err = d.archive.Write(dotBytes)
+	_, err = d.tar.Write(dotBytes)
 	return err
 }
 
@@ -213,15 +251,20 @@ func (d *debugInfo) writeFile(name string, data []byte) error {
 		Mode: 0644,
 		Size: int64(len(data)),
 	}
-	err := d.archive.WriteHeader(hdr)
+	err := d.tar.WriteHeader(hdr)
 	if err != nil {
 		return err
 	}
 
-	_, err = d.archive.Write(data)
+	_, err = d.tar.Write(data)
 	return err
 }
 
+// DebugHook implements all methods of the terraform.Hook interface, and writes
+// the arguments to a file in the archive. When a suitable format for the
+// argument isn't available, the argument is encoded using json.Marshal. If the
+// debug handler is nil, all DebugHook methods are noop, so no time is spent in
+// marshaling the data structures.
 type DebugHook struct{}
 
 func (*DebugHook) PreApply(ii *InstanceInfo, is *InstanceState, id *InstanceDiff) (HookAction, error) {
