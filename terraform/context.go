@@ -231,11 +231,8 @@ func (c *Context) ShadowError() error {
 // This modifies the configuration in-place, so asking for Input twice
 // may result in different UI output showing different current values.
 func (c *Context) Input(mode InputMode) error {
-	v := c.acquireRun()
+	v := c.acquireRun("input")
 	defer c.releaseRun(v)
-
-	debug.SetPhase("input")
-	defer debug.SetPhase("INVALID")
 
 	if mode&InputModeVar != 0 {
 		// Walk the variables first for the root module. We walk them in
@@ -354,11 +351,8 @@ func (c *Context) Input(mode InputMode) error {
 // In addition to returning the resulting state, this context is updated
 // with the latest state.
 func (c *Context) Apply() (*State, error) {
-	v := c.acquireRun()
+	v := c.acquireRun("apply")
 	defer c.releaseRun(v)
-
-	debug.SetPhase("apply")
-	defer debug.SetPhase("INVALID")
 
 	// Copy our own state
 	c.state = c.state.DeepCopy()
@@ -454,11 +448,8 @@ func (c *Context) Apply() (*State, error) {
 // Plan also updates the diff of this context to be the diff generated
 // by the plan, so Apply can be called after.
 func (c *Context) Plan() (*Plan, error) {
-	v := c.acquireRun()
+	v := c.acquireRun("plan")
 	defer c.releaseRun(v)
-
-	debug.SetPhase("plan")
-	defer debug.SetPhase("INVALID")
 
 	p := &Plan{
 		Module:  c.module,
@@ -557,11 +548,8 @@ func (c *Context) Plan() (*Plan, error) {
 // Even in the case an error is returned, the state will be returned and
 // will potentially be partially updated.
 func (c *Context) Refresh() (*State, error) {
-	v := c.acquireRun()
+	v := c.acquireRun("refresh")
 	defer c.releaseRun(v)
-
-	debug.SetPhase("refresh")
-	defer debug.SetPhase("INVALID")
 
 	// Copy our own state
 	c.state = c.state.DeepCopy()
@@ -606,11 +594,8 @@ func (c *Context) Stop() {
 
 // Validate validates the configuration and returns any warnings or errors.
 func (c *Context) Validate() ([]string, []error) {
-	v := c.acquireRun()
+	v := c.acquireRun("validate")
 	defer c.releaseRun(v)
-
-	debug.SetPhase("validate")
-	defer debug.SetPhase("INVALID")
 
 	var errs error
 
@@ -671,9 +656,11 @@ func (c *Context) SetVariable(k string, v interface{}) {
 	c.variables[k] = v
 }
 
-func (c *Context) acquireRun() chan<- struct{} {
+func (c *Context) acquireRun(phase string) chan<- struct{} {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	debug.SetPhase(phase)
 
 	// Wait for no channel to exist
 	for c.runCh != nil {
@@ -699,6 +686,11 @@ func (c *Context) acquireRun() chan<- struct{} {
 func (c *Context) releaseRun(ch chan<- struct{}) {
 	c.l.Lock()
 	defer c.l.Unlock()
+
+	// setting the phase to "INVALID" lets us easily detect if we have
+	// operations happening outside of a run, or we missed setting the proper
+	// phase
+	debug.SetPhase("INVALID")
 
 	close(ch)
 	c.runCh = nil
