@@ -722,17 +722,13 @@ func (c *Context) walk(
 		log.Printf("[WARN] terraform: shadow graph disabled")
 	}
 
-	// Build the real graph walker
-	debugGraph, err := NewDebugGraph("walk", graph, nil)
-	if err != nil {
-		log.Printf("[ERROR] %v", err)
-	}
-
 	log.Printf("[DEBUG] Starting graph walk: %s", operation.String())
+
+	dg, _ := NewDebugGraph("walk", graph, nil)
 	walker := &ContextGraphWalker{
 		Context:    realCtx,
 		Operation:  operation,
-		DebugGraph: debugGraph,
+		DebugGraph: dg,
 	}
 
 	// Walk the real graph, this will block until it completes
@@ -752,17 +748,12 @@ func (c *Context) walk(
 
 	// If we have a shadow graph, wait for that to complete.
 	if shadowCloser != nil {
-		// create a debug graph for this walk
-		debugGraph, err := NewDebugGraph("walk-shadow", shadow, nil)
-		if err != nil {
-			log.Printf("[ERROR] %v", err)
-		}
-
 		// Build the graph walker for the shadow.
+		dg, _ := NewDebugGraph("walk-shadow", shadow, nil)
 		shadowWalker := &ContextGraphWalker{
 			Context:    shadowCtx,
 			Operation:  operation,
-			DebugGraph: debugGraph,
+			DebugGraph: dg,
 		}
 
 		// Kick off the shadow walk. This will block on any operations

@@ -26,14 +26,11 @@ type BasicGraphBuilder struct {
 }
 
 func (b *BasicGraphBuilder) Build(path []string) (*Graph, error) {
+	log.Println("[XXXX] Bulding graph for", b.Name)
 	g := &Graph{Path: path}
 	for _, step := range b.Steps {
 		if step == nil {
 			continue
-		}
-
-		if err := step.Transform(g); err != nil {
-			return g, err
 		}
 
 		// record the debug graph for this transformation
@@ -43,11 +40,25 @@ func (b *BasicGraphBuilder) Build(path []string) (*Graph, error) {
 			stepName = stepName[dot+1:]
 		}
 
-		dg, err := NewDebugGraph("build-"+stepName, g, nil)
+		err := step.Transform(g)
+
+		// always log the graph state to see what transformations may have happened
+		debugName := "build-" + stepName
+		if b.Name != "" {
+			debugName = b.Name + "-" + debugName
+		}
+
+		dg, _ := NewDebugGraph(debugName, g, nil)
+
 		if err != nil {
-			log.Printf("[ERROR] %v", err)
+			// add any error message to the graph log
+			dg.Printf("%s", err)
 		}
 		debug.WriteGraph(dg)
+
+		if err != nil {
+			return g, err
+		}
 	}
 
 	// Validate the graph structure

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hashicorp/terraform/dag"
 	"github.com/hashicorp/terraform/dot"
 )
@@ -42,6 +43,7 @@ func NewDebugGraph(name string, g *Graph, opts *GraphDotOpts) (*DebugGraph, erro
 
 	err := dg.build(g)
 	if err != nil {
+		debug.WriteFile(dg.Name, []byte(err.Error()))
 		return nil, err
 	}
 	return dg, nil
@@ -106,6 +108,9 @@ func (dg *DebugGraph) DebugNode(v interface{}) {
 			break
 		}
 	}
+
+	// record as much of the node data structure as we can
+	spew.Fdump(&dg.buf, v)
 
 	// for now, record the order of visits in the node label
 	if node != nil {
