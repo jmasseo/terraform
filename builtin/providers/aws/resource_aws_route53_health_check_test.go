@@ -122,6 +122,25 @@ func TestAccAWSRoute53HealthCheck_CloudWatchAlarmCheck(t *testing.T) {
 	})
 }
 
+func TestAccAWSRoute53HealthCheck_withSNI(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:      func() { testAccPreCheck(t) },
+		IDRefreshName: "aws_route53_health_check.foo",
+		Providers:     testAccProviders,
+		CheckDestroy:  testAccCheckRoute53HealthCheckDestroy,
+		Steps: []resource.TestStep{
+			resource.TestStep{
+				Config: testAccRoute53HealthCheckConfigWithSNI,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRoute53HealthCheckExists("aws_route53_health_check.foo"),
+					resource.TestCheckResourceAttr(
+						"aws_route53_health_check.foo", "enable_sni", "OK"),
+				),
+			},
+		},
+	})
+}
+
 func testAccCheckRoute53HealthCheckDestroy(s *terraform.State) error {
 	conn := testAccProvider.Meta().(*AWSClient).r53conn
 
