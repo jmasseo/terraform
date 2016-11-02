@@ -23,6 +23,8 @@ type GraphBuilder interface {
 type BasicGraphBuilder struct {
 	Steps    []GraphTransformer
 	Validate bool
+	// Optional name to add to the graph debug log
+	Name string
 }
 
 func (b *BasicGraphBuilder) Build(path []string) (*Graph, error) {
@@ -119,6 +121,7 @@ func (b *BuiltinGraphBuilder) Build(path []string) (*Graph, error) {
 	basic := &BasicGraphBuilder{
 		Steps:    b.Steps(path),
 		Validate: b.Validate,
+		Name:     "builtin",
 	}
 
 	return basic.Build(path)
